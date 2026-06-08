@@ -1,77 +1,77 @@
 import socket
-import csv
 import numpy as np
 
 # Cấu hình
 UDP_IP = "127.0.0.1"
 UDP_PORT = 9999
+FILE_NAME = "fingerprint_3d.txt"
 
 def start_collector():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
-    
-    # Thiết lập timeout ngắn để có thể dọn đệm mà không bị treo
     sock.settimeout(0.1)
     
-    print(f"--- Đang lắng nghe dữ liệu từ Server C trên cổng {UDP_PORT} ---")
-    print("Nhấn Ctrl+C để kết thúc.")
-
-    with open(r'D:\project 2\radio_map_raw.csv', mode='a', newline='') as file:
-        writer = csv.writer(file)
-
-        try:
-            while True:
-                user_input = input("\nNhập tọa độ (x,y) và nhấn Enter để BẮT ĐẦU lấy mẫu: ")
+    print(f"--- Đang lắng nghe Server C trên cổng {UDP_PORT} ---")
+    print(f"Dữ liệu sẽ được lưu vào file: {FILE_NAME}")
+    
+    with open(FILE_NAME, mode='a', encoding='utf-8') as file:
+        while True:
+            try:
+                user_input = input("\nNhập tọa độ x,y,z (VD: 382,90,150) hoặc Ctrl+C để thoát: ")
                 if not user_input: continue
                 
-                try:
-                    target_x, target_y = user_input.split(',')
-                    
-                    # --- BƯỚC QUAN TRỌNG: DỌN SẠCH BỘ ĐỆM (FLUSH) ---
-                    print("Đang xả bỏ dữ liệu cũ trong bộ đệm...")
-                    while True:
-                        try:
-                            # Đọc liên tục cho đến khi không còn gói tin nào xếp hàng
-                            sock.recvfrom(1024)
-                        except socket.timeout:
-                            # Khi không còn gì để đọc, hàm recvfrom sẽ văng timeout -> Bộ đệm đã sạch
-                            break
-                    
-                    # --- BẮT ĐẦU LẤY DỮ LIỆU MỚI ---
-                    print(f"Đang thu thập 50 mẫu MỚI NHẤT tại ({target_x}, {target_y})...")
-                    samples = []
-                    while len(samples) < 10:
-                        try:
-                            data, addr = sock.recvfrom(1024)
-                            rssi_str = data.decode('utf-8')
-                            rssi_vals = [float(x) for x in rssi_str.split(',')]
-                            samples.append(rssi_vals)
-                            
-                            # Hiển thị tiến trình cho đỡ sốt ruột
+                parts = user_input.split(',')
+                if len(parts) != 3:
+                    print("Lỗi: Vui lòng nhập đúng 3 giá trị x,y,z cách nhau bằng dấu phẩy.")
+                    continue
+                
+                target_x, target_y, target_z = map(float, parts)
+                
+                # Xả bộ đệm (xóa dữ liệu cũ)
+                print("Đang xả bộ đệm...")
+                while True:
+                    try:
+                        sock.recvfrom(1024)
+                    except socket.timeout:
+                        break
+                
+                # Lấy 50 mẫu mới
+                print(f"Đang thu thập 50 mẫu tại ({target_x}, {target_y}, {target_z})...")
+                samples = []
+                sock.settimeout(2.0) # Tăng timeout khi đang lấy mẫu
+                
+                while len(samples) < 50:
+                    try:
+                        data, addr = sock.recvfrom(1024)
+                        rssi_str = data.decode('utf-8')
+                        rssi_vals = [float(x) for x in rssi_str.split(',')]
+                        
+                        if len(rssi_vals) >= 3:
+                            samples.append(rssi_vals[:3])
                             if len(samples) % 10 == 0:
                                 print(f"Đã lấy {len(samples)}/50 mẫu...")
-                        except socket.timeout:
-                            continue # Đợi gói tin tiếp theo từ Server C
-                    
+                    except socket.timeout:
+                        print("Cảnh báo: Mất kết nối với Server C!")
+                        break
+                
+                if len(samples) == 50:
                     # Tính trung bình
-                    avg_rssi = np.mean(samples, axis=0)
-                    avg_rssi = np.round(avg_rssi, 2)
+                    avg_rssi = np.round(np.mean(samples, axis=0), 2).tolist()
                     
-                    # Lưu file
-                    writer.writerow([target_x, target_y, avg_rssi[0], avg_rssi[1], avg_rssi[2]])
+                    # Tạo chuỗi theo định dạng yêu cầu
+                    # VD: (382.0, 90.0, 150.0) : [-72.37, -64.25, -74.87]
+                    line = f"({target_x}, {target_y}, {target_z}) : {avg_rssi}\n"
+                    
+                    file.write(line)
                     file.flush()
-                    
-                    print(f"==> THÀNH CÔNG: ({target_x}, {target_y}) -> RSSI: {avg_rssi.tolist()}")
-                    
-                except ValueError:
-                    print("Lỗi định dạng! Vui lòng nhập x,y (Ví dụ: 382,90)")
-                except Exception as e:
-                    print(f"Lỗi: {e}")
-
-        except KeyboardInterrupt:
-            print("\nĐã lưu và thoát.")
-        finally:
-            sock.close()
+                    print(f"==> Đã lưu: {line.strip()}")
+                
+            except ValueError:
+                print("Lỗi định dạng số!")
+            except KeyboardInterrupt:
+                print("\nĐã thoát chương trình.")
+                break
+    sock.close()
 
 if __name__ == "__main__":
     start_collector()

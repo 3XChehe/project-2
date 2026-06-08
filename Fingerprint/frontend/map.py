@@ -1,262 +1,72 @@
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 import socket
 import threading
+import ast
 
 # Cấu hình phòng
-ROOM_WIDTH, ROOM_HEIGHT = 382, 420
+ROOM_WIDTH, ROOM_HEIGHT, ROOM_Z = 382, 420, 300 # Giả sử trần nhà cao 300cm
 PYTHON_PORT = 9999
+FILE_NAME = "fingerprint_3d.txt"
 
-# Danh sách vật thể cố định
+# Danh sách vật thể cố định: (x, y, z_start, w, h, d_height, color, label)
+# Tôi thêm thông số chiều cao (d_height) giả định cho các vật thể
 OBJECTS = [
-    (100, 0, 148, 50, 'red', 'tu1'),
-    (0, 16, 64, 181, 'blue', 'tu2'),
-    (9, 197, 52, 40, 'green', 'tu3'),
-    (5, 265, 200, 155, 'orange', 'giuong'),
-    (328, 243, 54, 123, 'purple', 'tu5'),
-    (312, 123, 70, 120, 'cyan', 'ban')
+    (100, 0, 0, 148, 50, 90, 'red', 'tu1'),     # Tủ cao 200cm
+    (0, 16, 0, 64, 181, 225, 'blue', 'tu2'),
+    (9, 197, 0, 52, 40, 65, 'green', 'tu3'),
+    (5, 265, 45, 200, 155, 5, 'orange', 'giuong'), # Giường cao 50cm
+    (328, 243, 0, 54, 123, 200, 'purple', 'tu5'),
+    (312, 123, 0, 70, 120, 75, 'cyan', 'ban')      # Bàn cao 80cm
 ]
-# ... giữ nguyên dictionary fingerprint_db của bạn ...
-fingerprint_db = {
-    (382, 0): [-71.45,-62.1,-74.36],
-    (352, 0): [-70.85,-52.52,-78.85],
-    (322, 0): [-68.73,-53.24,-76.46],
-    (292, 0): [-65.09,-54.19,-70.36],
-    (262, 0): [-74.87,-25.92,-73.62],
-    (232, 0): [],
-    (202, 0): [],
-    (172, 0): [],
-    (142, 0): [],
-    (112, 0): [],
-    (82, 0): [-69.06,-75.84,-76.54],
-    (52, 0): [],
-    (22, 0): [],
 
-    (382,30): [-70.64,-52.01,-72.23],
-    (352,30): [-72.67,-57.85,-76.52],
-    (322,30): [-71.4,-53.19,-75.13],
-    (292,30): [-59.9,-56.16,-73.04],
-    (262,30): [-61.14,-44.64,-71.91],
-    (232,30): [],
-    (202,30): [],
-    (172,30): [],
-    (142,30): [],
-    (112,30): [],
-    (82,30): [-70.19,-74.44,-69.49],
-    (52,30): [],
-    (22,30): [],
+current_pos = [0, 0, 0]
+fingerprint_db = {}
 
-    (382,60): [-71.91,-53.03,-77.3],
-    (352,60): [-71.69,-44.44,-76.37],
-    (322,60): [-72.12,-44.25,-76.51],
-    (292,60): [-70.23,-38.89,-72.72],
-    (262,60): [-69.3,-71.63,-71.6],
-    (232,60): [-67.85,-64.99,-73.98],
-    (202,60): [-69.54,-58.92,-74.75],
-    (172,60): [-66.49,-60.59,-73.1],
-    (142,60): [-67.84,-63.96,-70.11],
-    (112,60): [-69.35,-67.92,-70.8],
-    (82, 60): [-69.3,-71.63,-71.6],
-    (52, 60): [],
-    (22, 60): [],
+# --- ĐỌC CƠ SỞ DỮ LIỆU TỪ FILE TXT ---
+def load_database():
+    try:
+        with open(FILE_NAME, "r", encoding='utf-8') as f:
+            for line in f:
+                if not line.strip(): continue
+                # Tách chuỗi tại dấu ":"
+                coord_str, rssi_str = line.split(":")
+                # Dùng ast.literal_eval để chuyển chuỗi thành tuple và list an toàn
+                coord = ast.literal_eval(coord_str.strip())
+                rssi = ast.literal_eval(rssi_str.strip())
+                fingerprint_db[coord] = rssi
+        print(f"Đã nạp {len(fingerprint_db)} điểm Fingerprint vào bộ nhớ.")
+    except FileNotFoundError:
+        print(f"Lỗi: Không tìm thấy file {FILE_NAME}. Hãy chạy script thu thập trước!")
+    except Exception as e:
+        print(f"Lỗi khi đọc file: {e}")
 
-    (382,90): [-72.37,-64.25,-74.87],
-    (352,90): [-72.98,-63.26,-72.09],
-    (322,90): [-74.04,-61.33,-72.79],
-    (292,90): [-63.34,-54.91,-74.21],
-    (262,90): [-69.23,-60.97,-70.23],
-    (232,90): [-67.31,-56.58,-69.74],
-    (202,90): [-58.95,-50.88,-67.74],
-    (172,90): [-69.15,-62.72,-70.19],
-    (142,90): [-67.29,-63.14,-74.21],
-    (112,90): [-62.02,-69.1,-67.83],
-    (82, 90): [-57.54,-70.02,-65.25],
-    (52, 90): [],
-    (22, 90): [],
-
-    (382,120): [-69.2,-48.68,-77.94],
-    (352,120): [-68.18,-47.72,-82.29],
-    (322,120): [-61.28,-62.25,-69.51],
-    (292,120): [-63.11,-46.3,-71.72],
-    (262,120): [-65.05,-68.57,-65.32],
-    (232,120): [-63.78,-62.47,-68.65],
-    (202,120): [-65.61,-62.8,-73.89],
-    (172,120): [-61.28,-62.25,-69.51],
-    (142,120): [-65.47,-64.43,-66.11],
-    (112,120): [-59.09,-66.38,-63.43],
-    (82, 120): [-65.05,-68.57,-65.32],
-    (52, 120): [],
-    (22, 120): [],
-
-    (382,150): [],
-    (352,150): [],
-    (322,150): [],
-    (292,150): [-61.32,-50.37,-70.95],
-    (262,150): [-68.06,-61.94,-68.19],
-    (232,150): [-58.08,-56.93,-71.91],
-    (202,150): [-53.32,-57.06,-68.92],
-    (172,150): [-53.22,-65.35,-75.32],
-    (142,150): [-62.84,-66.57,-72.17],
-    (112,150): [-67.66,-60.57,-70.56],
-    (82, 150): [-68.06,-61.94,-68.19],
-    (52, 150): [],
-    (22, 150): [],
-
-    (382,180): [],
-    (352,180): [],
-    (322,180): [],
-    (292,180): [-58.98, -58.64, -63.67],
-    (262,180): [-58.54, -61.98, -62.22],
-    (232,180): [-60.72, -63.78, -63.09],
-    (202,180): [-64.45, -66.23, -62.33],
-    (172,180): [-64.84, -64.28, -62.89],
-    (142,180): [-65.93, -64.15, -66.14],
-    (112,180): [-67.42, -65.85, -68.5],
-    (82, 180): [-60.6, -69.79, -67.51],
-    (52, 180): [],
-    (22, 180): [],
-
-    (382,210): [],
-    (352,210): [],
-    (322,210): [],
-    (292,210): [-55.61, -57.97, -66.34],
-    (262,210): [-53.83, -59.04, -65.42],
-    (232,210): [-59.41, -61.46, -62.52],
-    (202,210): [-59.5, -62.94, -62.7],
-    (172,210): [-61.86, -62.96, -59.72],
-    (142,210): [-61.33, -65.25, -51.82],
-    (112,210): [-60.7, -65.64, -47.85],
-    (82, 210): [-56.99, -64.8, -41.86],
-    (52, 210): [],
-    (22, 210): [],
-
-    (382,240): [],
-    (352,240): [],
-    (322,240): [],
-    (292,240): [-56.76, -61.39, -62.78],
-    (262,240): [-53.42, -62.44, -59.99],
-    (232,240): [-48, -65, -61.11],
-    (202,240): [-49.13, -67.84, -58.23],
-    (172,240): [-48.58, -69.31, -58.1],
-    (142,240): [-48.53, -68.87, -51.47],
-    (112,240): [-49.57, -67.44, -49.2],
-    (82, 240): [-52.01, -67.65, -49.13],
-    (52, 240): [],
-    (22, 240): [],
-
-    (382,270): [],
-    (352,270): [],
-    (322,270): [],
-    (292,270): [-51.59, -54.63, -62.28],
-    (262,270): [-52.25, -59.94, -61.48],
-    (232,270): [-59.12, -65.41, -60.62],
-    (202,270): [-58.78, -62.83, -64.04],
-    (172,270): [],
-    (142,270): [],
-    (112,270): [],
-    (82, 270): [],
-    (52, 270): [],
-    (22, 270): [],
-
-    (382,300): [],
-    (352,300): [],
-    (322,300): [],
-    (292,300): [-56.01, -59.09, -68.59],
-    (262,300): [-48.04, -62.51, -64.06],
-    (232,300): [-51.51, -64.17, -59.9],
-    (202,300): [-56.68, -67.54, -59.72],
-    (172,300): [],
-    (142,300): [],
-    (112,300): [],
-    (82, 300): [],
-    (52, 300): [],
-    (22, 300): [],
-
-    (382,330): [],
-    (352,330): [],
-    (322,330): [],
-    (292,330): [-57.31, -66.15, -65.83],
-    (262,330): [-50.59, -65.36, -59.93],
-    (232,330): [-46.04, -68.31, -59.88],
-    (202,330): [-51.79, -64.55, -61.65],
-    (172,330): [],
-    (142,330): [],
-    (112,330): [],
-    (82, 330): [],
-    (52, 330): [],
-    (22, 330): [],
-
-    (382,360): [],
-    (352,360): [],
-    (322,360): [],
-    (292,360): [-44.88, -73.07, -63.21],
-    (262,360): [-36.98, -73.56, -65.73],
-    (232,360): [-36.68, -72.89, -68.36],
-    (202,360): [-41.9, -70.87, -62.06],
-    (172,360): [],
-    (142,360): [],
-    (112,360): [],
-    (82, 360): [],
-    (52, 360): [],
-    (22, 360): [],
-
-    (382,390): [],
-    (352,390): [],
-    (322,390): [],
-    (292,390): [-51.31, -71.98, -66.16],
-    (262,390): [-45.61, -70.28, -67.06],
-    (232,390): [-34.56, -69.88, -63.12],
-    (202,390): [-38.68, -67.92, -63.29],
-    (172,390): [],
-    (142,390): [],
-    (112,390): [],
-    (82, 390): [],
-    (52, 390): [],
-    (22, 390): [],
-
-    (382,420): [],
-    (352,420): [],
-    (322,420): [],
-    (292,420): [-61.52,-76.83,-70.63],
-    (262,420): [-40.46,-75.75,-65.31],
-    (232,420): [-21.52,-72.03,-67.86],
-    (202,420): [-37.2,-66.9,-70.84],
-    (172,420): [],
-    (142,420): [],
-    (112,420): [],
-    (82, 420): [],
-    (52, 420): [],
-    (22, 420): [],
-}
-
-current_pos = [0, 0]
-
-def find_position(current_rssi, k=3):
+# --- THUẬT TOÁN ĐỊNH VỊ 3D ---
+def find_position_3d(current_rssi, k=3):
     distances = []
     for coord, rssi_vector in fingerprint_db.items():
-        # SỬA LỖI: Chỉ tính với những điểm đã có dữ liệu
-        if len(rssi_vector) < 3:
-            continue
+        if len(rssi_vector) < 3: continue
             
+        # Khoảng cách không gian tín hiệu
         dist = np.sqrt(sum((current_rssi[i] - rssi_vector[i])**2 for i in range(3)))
         distances.append((dist, coord))
     
-    # Nếu không tìm thấy điểm nào (do chưa đo hoặc chưa nhận đủ dữ liệu), trả về tọa độ cũ hoặc 0
     if not distances:
-        return current_pos[0], current_pos[1]
+        return current_pos[0], current_pos[1], current_pos[2]
     
     distances.sort(key=lambda x: x[0])
     neighbors = distances[:k]
     
-    # Tính trọng số
     total_w = sum(1.0 / (d[0] + 0.1) for d in neighbors)
     
     final_x = sum(n[1][0] * (1.0 / (n[0] + 0.1)) for n in neighbors) / total_w
     final_y = sum(n[1][1] * (1.0 / (n[0] + 0.1)) for n in neighbors) / total_w
+    final_z = sum(n[1][2] * (1.0 / (n[0] + 0.1)) for n in neighbors) / total_w
     
-    return final_x, final_y
+    return final_x, final_y, final_z
 
+# --- LẮNG NGHE UDP ---
 def udp_listener():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("127.0.0.1", PYTHON_PORT))
@@ -265,49 +75,68 @@ def udp_listener():
             data, addr = sock.recvfrom(1024)
             rssi_str = data.decode('utf-8')
             rssi_vals = [float(x) for x in rssi_str.split(',')]
-            # Cập nhật vị trí
-            x, y = find_position(rssi_vals)
-            current_pos[0], current_pos[1] = x, y
-        except Exception as e:
-            pass # Bỏ qua lỗi nhận dữ liệu
+            if len(rssi_vals) >= 3:
+                x, y, z = find_position_3d(rssi_vals)
+                current_pos[0], current_pos[1], current_pos[2] = x, y, z
+        except Exception:
+            pass 
 
-threading.Thread(target=udp_listener, daemon=True).start()
+# --- HÀM VẼ KHỐI HỘP 3D ---
+def draw_3d_box(ax, x, y, z, w, h, d, color, alpha=0.2):
+    # Các đỉnh của hình hộp
+    vertices = np.array([
+        [x, y, z], [x+w, y, z], [x+w, y+h, z], [x, y+h, z],
+        [x, y, z+d], [x+w, y, z+d], [x+w, y+h, z+d], [x, y+h, z+d]
+    ])
+    # Định nghĩa các mặt từ đỉnh
+    faces = [
+        [vertices[0], vertices[1], vertices[2], vertices[3]], # Đáy
+        [vertices[4], vertices[5], vertices[6], vertices[7]], # Đỉnh
+        [vertices[0], vertices[1], vertices[5], vertices[4]], # Trước
+        [vertices[2], vertices[3], vertices[7], vertices[6]], # Sau
+        [vertices[1], vertices[2], vertices[6], vertices[5]], # Phải
+        [vertices[0], vertices[3], vertices[7], vertices[4]]  # Trái
+    ]
+    ax.add_collection3d(Poly3DCollection(faces, facecolors=color, linewidths=1, edgecolors='black', alpha=alpha))
 
-# --- SỬA CÁCH VẼ ĐỒ THỊ ---
+# --- HIỂN THỊ ĐỒ THỊ ---
 plt.ion()
-fig, ax = plt.subplots(figsize=(6, 8))
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
 
 def update_map():
     while True:
         ax.clear()
         
-        # 1. Thiết lập giới hạn
-        ax.set_xlim(-20, ROOM_WIDTH + 20)
-        ax.set_ylim(-20, ROOM_HEIGHT + 20)
+        # Thiết lập góc nhìn và giới hạn
+        ax.set_xlim(0, ROOM_WIDTH)
+        ax.set_ylim(0, ROOM_HEIGHT)
+        ax.set_zlim(0, ROOM_Z)
+        ax.set_xlabel('Trục X')
+        ax.set_ylabel('Trục Y')
+        ax.set_zlabel('Trục Z (Độ cao)')
         
-        # 2. Vẽ khung phòng
-        room = patches.Rectangle((0, 0), ROOM_WIDTH, ROOM_HEIGHT, linewidth=2, edgecolor='black', facecolor='none')
-        ax.add_patch(room)
-        
-        # 3. Vẽ các vật thể
-        for x, y, w, h, color, label in OBJECTS:
-            rect = patches.Rectangle((x, y), w, h, linewidth=1, edgecolor=color, facecolor=color, alpha=0.3)
-            ax.add_patch(rect)
-            ax.text(x + w/2, y + h/2, label, fontsize=8, ha='center', va='center')
+        # Vẽ các vật thể 3D
+        for x, y, z, w, h, d, color, label in OBJECTS:
+            draw_3d_box(ax, x, y, z, w, h, d, color)
+            # Gắn nhãn phía trên vật thể
+            ax.text(x + w/2, y + h/2, z + d + 10, label, color='black', ha='center')
 
-        # 4. Vẽ các điểm Fingerprint đã đo (loại bỏ [] để tránh lỗi)
-        valid_fps = [p for p, v in fingerprint_db.items() if len(v) == 3]
-        if valid_fps:
-            fps_x, fps_y = zip(*valid_fps)
-            ax.scatter(fps_x, fps_y, c='gray', s=5, alpha=0.2)
+        # Vẽ các điểm Fingerprint đã đo (màu xám)
+        if fingerprint_db:
+            fps_x, fps_y, fps_z = zip(*fingerprint_db.keys())
+            ax.scatter(fps_x, fps_y, fps_z, c='gray', s=10, alpha=0.3, label='Dữ liệu mẫu')
 
-        # 5. Vẽ vị trí thiết bị hiện tại
-        ax.scatter(current_pos[0], current_pos[1], c='red', s=150, marker='X', label='Device')
+        # Vẽ vị trí thiết bị hiện tại (ngôi sao đỏ)
+        ax.scatter(current_pos[0], current_pos[1], current_pos[2], c='red', s=200, marker='*', label='Tag (Thiết bị)')
         
-        ax.set_aspect('equal')
+        # Tùy chỉnh góc xoay mặc định (elevation, azimuth)
+        ax.view_init(elev=20, azim=45)
+        
         plt.draw()
         plt.pause(0.1)
 
-# Chạy listener và vẽ đồ thị
+# Chạy hệ thống
+load_database()
 threading.Thread(target=udp_listener, daemon=True).start()
 update_map()

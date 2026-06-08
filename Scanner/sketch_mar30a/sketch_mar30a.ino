@@ -6,7 +6,7 @@
 
 const char *ssid = "CAO SY";
 const char *password = "0936074767";
-const char *serverIP = "192.168.100.16";
+const char *serverIP = "192.168.100.8";
 const int serverPort = 8888;
 WiFiClient client;
 

@@ -11,14 +11,13 @@ PYTHON_PORT = 9999
 FILE_NAME = "fingerprint_3d.txt"
 
 # Danh sách vật thể cố định: (x, y, z_start, w, h, d_height, color, label)
-# Tôi thêm thông số chiều cao (d_height) giả định cho các vật thể
 OBJECTS = [
-    (100, 0, 0, 148, 50, 90, 'red', 'tu1'),     # Tủ cao 200cm
+    (100, 0, 0, 148, 50, 90, 'red', 'tu1'),     
     (0, 16, 0, 64, 181, 225, 'blue', 'tu2'),
     (9, 197, 0, 52, 40, 65, 'green', 'tu3'),
-    (5, 265, 45, 200, 155, 5, 'orange', 'giuong'), # Giường cao 50cm
+    (5, 265, 45, 200, 155, 5, 'orange', 'giuong'), 
     (328, 243, 0, 54, 123, 200, 'purple', 'tu5'),
-    (312, 123, 0, 70, 120, 75, 'cyan', 'ban')      # Bàn cao 80cm
+    (312, 123, 0, 70, 120, 75, 'cyan', 'ban')      
 ]
 
 current_pos = [0, 0, 0]
@@ -30,9 +29,7 @@ def load_database():
         with open(FILE_NAME, "r", encoding='utf-8') as f:
             for line in f:
                 if not line.strip(): continue
-                # Tách chuỗi tại dấu ":"
                 coord_str, rssi_str = line.split(":")
-                # Dùng ast.literal_eval để chuyển chuỗi thành tuple và list an toàn
                 coord = ast.literal_eval(coord_str.strip())
                 rssi = ast.literal_eval(rssi_str.strip())
                 fingerprint_db[coord] = rssi
@@ -48,7 +45,6 @@ def find_position_3d(current_rssi, k=3):
     for coord, rssi_vector in fingerprint_db.items():
         if len(rssi_vector) < 3: continue
             
-        # Khoảng cách không gian tín hiệu
         dist = np.sqrt(sum((current_rssi[i] - rssi_vector[i])**2 for i in range(3)))
         distances.append((dist, coord))
     
@@ -83,19 +79,17 @@ def udp_listener():
 
 # --- HÀM VẼ KHỐI HỘP 3D ---
 def draw_3d_box(ax, x, y, z, w, h, d, color, alpha=0.2):
-    # Các đỉnh của hình hộp
     vertices = np.array([
         [x, y, z], [x+w, y, z], [x+w, y+h, z], [x, y+h, z],
         [x, y, z+d], [x+w, y, z+d], [x+w, y+h, z+d], [x, y+h, z+d]
     ])
-    # Định nghĩa các mặt từ đỉnh
     faces = [
-        [vertices[0], vertices[1], vertices[2], vertices[3]], # Đáy
-        [vertices[4], vertices[5], vertices[6], vertices[7]], # Đỉnh
-        [vertices[0], vertices[1], vertices[5], vertices[4]], # Trước
-        [vertices[2], vertices[3], vertices[7], vertices[6]], # Sau
-        [vertices[1], vertices[2], vertices[6], vertices[5]], # Phải
-        [vertices[0], vertices[3], vertices[7], vertices[4]]  # Trái
+        [vertices[0], vertices[1], vertices[2], vertices[3]], 
+        [vertices[4], vertices[5], vertices[6], vertices[7]], 
+        [vertices[0], vertices[1], vertices[5], vertices[4]], 
+        [vertices[2], vertices[3], vertices[7], vertices[6]], 
+        [vertices[1], vertices[2], vertices[6], vertices[5]], 
+        [vertices[0], vertices[3], vertices[7], vertices[4]]  
     ]
     ax.add_collection3d(Poly3DCollection(faces, facecolors=color, linewidths=1, edgecolors='black', alpha=alpha))
 
@@ -119,7 +113,6 @@ def update_map():
         # Vẽ các vật thể 3D
         for x, y, z, w, h, d, color, label in OBJECTS:
             draw_3d_box(ax, x, y, z, w, h, d, color)
-            # Gắn nhãn phía trên vật thể
             ax.text(x + w/2, y + h/2, z + d + 10, label, color='black', ha='center')
 
         # Vẽ các điểm Fingerprint đã đo (màu xám)
@@ -130,6 +123,19 @@ def update_map():
         # Vẽ vị trí thiết bị hiện tại (ngôi sao đỏ)
         ax.scatter(current_pos[0], current_pos[1], current_pos[2], c='red', s=200, marker='*', label='Tag (Thiết bị)')
         
+        # ----------------------------------------------------
+        # THAY ĐỔI TẠI ĐÂY: HIỂN THỊ TỌA ĐỘ X, Y, Z KHI ĐANG CHẠY
+        # ----------------------------------------------------
+        # Cách 1: Hiện tọa độ ngay trên đầu ngôi sao đỏ (cộng thêm 15 đơn vị Z để chữ bay lên trên)
+        ax.text(current_pos[0], current_pos[1], current_pos[2] + 15, 
+                f"({current_pos[0]:.1f}, {current_pos[1]:.1f}, {current_pos[2]:.1f})", 
+                color='red', fontweight='bold', ha='center', fontsize=10)
+        
+        # Cách 2: Hiện tọa độ dạng Text lớn ở Tiêu đề đồ thị (Title) cho dễ nhìn
+        ax.set_title(f"HỆ THỐNG ĐỊNH VỊ FINGERPRINT 3D\nTọa độ Tag: X = {current_pos[0]:.1f} | Y = {current_pos[1]:.1f} | Z = {current_pos[2]:.1f}", 
+                     fontsize=12, fontweight='bold', color='darkblue', pad=20)
+        # ----------------------------------------------------
+
         # Tùy chỉnh góc xoay mặc định (elevation, azimuth)
         ax.view_init(elev=20, azim=45)
         

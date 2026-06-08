@@ -20,7 +20,7 @@ typedef struct
 // Giữ nguyên danh sách MAC của bạn
 Scanner scanners[3] = {
     {"c8:f0:9e:26:48:80", -100.0f, 0}, // S1
-    {"d4:e9:f4:b1:69:a0", -100.0f, 0}, // S2
+    {"1c:c3:ab:c3:f7:78", -100.0f, 0}, // S2
     {"b0:cb:d8:9a:64:40", -100.0f, 0}  // S3
 };
 

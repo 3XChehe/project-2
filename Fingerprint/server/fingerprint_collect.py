@@ -26,7 +26,7 @@ def start_collector():
                     continue
                 
                 target_x, target_y, target_z = map(float, parts)
-                
+                sock.settimeout(0.1)
                 # Xả bộ đệm (xóa dữ liệu cũ)
                 print("Đang xả bộ đệm...")
                 while True:
@@ -35,12 +35,12 @@ def start_collector():
                     except socket.timeout:
                         break
                 
-                # Lấy 50 mẫu mới
-                print(f"Đang thu thập 50 mẫu tại ({target_x}, {target_y}, {target_z})...")
+                # Lấy 10 mẫu mới
+                print(f"Đang thu thập 10 mẫu tại ({target_x}, {target_y}, {target_z})...")
                 samples = []
-                sock.settimeout(2.0) # Tăng timeout khi đang lấy mẫu
+                sock.settimeout(10.0) # Tăng timeout khi đang lấy mẫu
                 
-                while len(samples) < 50:
+                while len(samples) < 10:
                     try:
                         data, addr = sock.recvfrom(1024)
                         rssi_str = data.decode('utf-8')
@@ -54,7 +54,7 @@ def start_collector():
                         print("Cảnh báo: Mất kết nối với Server C!")
                         break
                 
-                if len(samples) == 50:
+                if len(samples) == 10:
                     # Tính trung bình
                     avg_rssi = np.round(np.mean(samples, axis=0), 2).tolist()
                     

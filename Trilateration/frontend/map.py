@@ -77,7 +77,17 @@ while True:
         
         # 4. Vẽ Tag và vòng tròn
         if tag_pos is not None:
-            ax.scatter(tag_pos[0], tag_pos[1], c='blue', s=200, marker='*', label='Tag')
+            tx, ty = tag_pos[0], tag_pos[1]
+            
+            # Vẽ ngôi sao biểu diễn Tag
+            ax.scatter(tx, ty, c='blue', s=200, marker='*', label='Tag')
+            
+            # --- PHẦN THÊM VÀO: Hiển thị tọa độ (x, y) ngay trên Tag ---
+            ax.text(tx, ty + 15, f"Tag ({tx:.1f}, {ty:.1f})", 
+                    fontsize=10, color='blue', weight='bold', ha='center', va='bottom')
+            # ---------------------------------------------------------
+            
+            # Vẽ các vòng tròn khoảng cách
             ax.add_patch(plt.Circle(S1, d1, color='red', fill=False, linestyle='--', alpha=0.2))
             ax.add_patch(plt.Circle(S2, d2, color='red', fill=False, linestyle='--', alpha=0.2))
             ax.add_patch(plt.Circle(S3, d3, color='red', fill=False, linestyle='--', alpha=0.2))

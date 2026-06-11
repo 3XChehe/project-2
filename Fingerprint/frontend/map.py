@@ -99,10 +99,19 @@ fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
 
 def update_map():
+    # Thiết lập góc nhìn mặc định ban đầu (chỉ chạy 1 lần duy nhất trước vòng lặp)
+    ax.view_init(elev=20, azim=45)
+    
     while True:
+        # 1. LẤY GÓC NHÌN HIỆN TẠI (Người dùng đang xoay bằng chuột)
+        # Nếu là lần chạy đầu tiên, nó sẽ lấy góc (20, 45) ở trên
+        current_elev = ax.elev
+        current_azim = ax.azim
+        
+        # 2. Xóa đồ thị cũ
         ax.clear()
         
-        # Thiết lập góc nhìn và giới hạn
+        # Thiết lập giới hạn trục như cũ
         ax.set_xlim(0, ROOM_WIDTH)
         ax.set_ylim(0, ROOM_HEIGHT)
         ax.set_zlim(0, ROOM_Z)
@@ -115,29 +124,22 @@ def update_map():
             draw_3d_box(ax, x, y, z, w, h, d, color)
             ax.text(x + w/2, y + h/2, z + d + 10, label, color='black', ha='center')
 
-        # Vẽ các điểm Fingerprint đã đo (màu xám)
+        # Vẽ dữ liệu Fingerprint
         if fingerprint_db:
             fps_x, fps_y, fps_z = zip(*fingerprint_db.keys())
             ax.scatter(fps_x, fps_y, fps_z, c='gray', s=10, alpha=0.3, label='Dữ liệu mẫu')
 
-        # Vẽ vị trí thiết bị hiện tại (ngôi sao đỏ)
+        # Vẽ vị trí ngôi sao đỏ và hiển thị tọa độ
         ax.scatter(current_pos[0], current_pos[1], current_pos[2], c='red', s=200, marker='*', label='Tag (Thiết bị)')
-        
-        # ----------------------------------------------------
-        # THAY ĐỔI TẠI ĐÂY: HIỂN THỊ TỌA ĐỘ X, Y, Z KHI ĐANG CHẠY
-        # ----------------------------------------------------
-        # Cách 1: Hiện tọa độ ngay trên đầu ngôi sao đỏ (cộng thêm 15 đơn vị Z để chữ bay lên trên)
         ax.text(current_pos[0], current_pos[1], current_pos[2] + 15, 
                 f"({current_pos[0]:.1f}, {current_pos[1]:.1f}, {current_pos[2]:.1f})", 
                 color='red', fontweight='bold', ha='center', fontsize=10)
         
-        # Cách 2: Hiện tọa độ dạng Text lớn ở Tiêu đề đồ thị (Title) cho dễ nhìn
         ax.set_title(f"HỆ THỐNG ĐỊNH VỊ FINGERPRINT 3D\nTọa độ Tag: X = {current_pos[0]:.1f} | Y = {current_pos[1]:.1f} | Z = {current_pos[2]:.1f}", 
                      fontsize=12, fontweight='bold', color='darkblue', pad=20)
-        # ----------------------------------------------------
-
-        # Tùy chỉnh góc xoay mặc định (elevation, azimuth)
-        ax.view_init(elev=20, azim=45)
+        
+        # 3. KHÔI PHỤC LẠI GÓC NHÌN MÀ NGƯỜI DÙNG VỪA XOAY
+        ax.view_init(elev=current_elev, azim=current_azim)
         
         plt.draw()
         plt.pause(0.1)

@@ -11,27 +11,30 @@ const int serverPort = 8888;
 WiFiClient client;
 
 // ===== CẤU TRÚC KALMAN =====
-typedef struct
-{
-    float q;
-    float r;
-    float x;
-    float p;
-    float k;
+typedef struct {
+    float q; // Nhiễu hệ thống (Process noise covariance)
+    float r; // Nhiễu đo lường (Measurement noise covariance)
+    float x; // Giá trị ước lượng (Estimated value)
+    float p; // Sai số ước lượng (Estimation error covariance)
+    float k; // Hệ số Kalman Gain
+    bool is_initialized;
 } KalmanFilter;
 
-KalmanFilter rssiFilter;
-
-void kalman_init(KalmanFilter *f, float q, float r, float initial_value)
-{
+// Khởi tạo bộ lọc với tham số tối ưu cho Real-time Tracking (Phản ứng nhanh)
+void kalman_init(KalmanFilter *f, float q, float r, float initial_value) {
     f->q = q;
     f->r = r;
     f->x = initial_value;
     f->p = 1.0;
+    f->is_initialized = true;
 }
 
-float kalman_update(KalmanFilter *f, float measurement)
-{
+float kalman_update(KalmanFilter *f, float measurement) {
+    if (!f->is_initialized) {
+        // Nếu bộ lọc chưa từng chạy, lấy luôn giá trị đo đầu tiên làm gốc để tránh trễ
+        kalman_init(f, 0.1f, 4.0f, measurement);
+        return measurement;
+    }
     f->p = f->p + f->q;
     f->k = f->p / (f->p + f->r);
     f->x = f->x + f->k * (measurement - f->x);
@@ -39,51 +42,41 @@ float kalman_update(KalmanFilter *f, float measurement)
     return f->x;
 }
 
+// Bộ lọc Kalman riêng cho Beacon mục tiêu
+KalmanFilter targetBeaconFilter = {0, 0, 0, 0, 0, false}; 
+
 // ===== BLE CALLBACK =====
-class MyCallbacks : public BLEAdvertisedDeviceCallbacks
-{
-    void onResult(BLEAdvertisedDevice advertisedDevice)
-    {
-        // Lọc đúng UUID Beacon bạn đang dùng
-        if (advertisedDevice.isAdvertisingService(BLEUUID("12345678-1234-1234-1234-1234567890ab")))
-        {
-
+class MyCallbacks : public BLEAdvertisedDeviceCallbacks {
+    void onResult(BLEAdvertisedDevice advertisedDevice) {
+        // Lọc đúng UUID mục tiêu của bạn
+        if (advertisedDevice.isAdvertisingService(BLEUUID("12345678-1234-1234-1234-1234567890ab"))) {
+            
             float rawRSSI = (float)advertisedDevice.getRSSI();
-            float filteredRSSI = kalman_update(&rssiFilter, rawRSSI);
+            
+            // Cập nhật vào bộ lọc riêng của Beacon này
+            float filteredRSSI = kalman_update(&targetBeaconFilter, rawRSSI);
 
-            // Lấy MAC của chính con ESP32 này (Scanner MAC)
             String myMAC = WiFi.macAddress();
-            myMAC.toLowerCase(); // Server C thường so sánh chuỗi viết thường
+            myMAC.toLowerCase(); 
 
-            if (client.connected())
-            {
-                // ĐỊNH DẠNG KHỚP VỚI sscanf(line, "%[^,],%f,%f"):
-                // ScannerMAC,RawRSSI,FilteredRSSI
-                client.printf("%s,%.2f,%.2f\n",
-                              myMAC.c_str(),
-                              rawRSSI,
-                              filteredRSSI);
-
-                Serial.printf("Gửi tới Server C: %s, RSSI: %.2f\n", myMAC.c_str(), filteredRSSI);
+            if (client.connected()) {
+                // Gửi dữ liệu lên Server C
+                client.printf("%s,%.2f,%.2f\n", myMAC.c_str(), rawRSSI, filteredRSSI);
+                Serial.printf("[%s] Raw: %.1f | Kalman: %.1f\n", myMAC.c_str(), rawRSSI, filteredRSSI);
             }
         }
     }
 };
 
-void setup()
-{
+void setup() {
     Serial.begin(115200);
 
     WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED)
-    {
+    while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
     }
-    Serial.println("\nWiFi OK!");
-
-    // Khởi tạo Kalman
-    kalman_init(&rssiFilter, 0.05, 20.0, -60);
+    Serial.println("\nWiFi Connected OK!");
 
     BLEDevice::init("");
     BLEScan *pScan = BLEDevice::getScan();
@@ -91,18 +84,16 @@ void setup()
     pScan->setActiveScan(true);
 }
 
-void loop()
-{
-    if (!client.connected())
-    {
-        if (client.connect(serverIP, serverPort))
-        {
-            Serial.println("Đã kết nối Server C!");
+void loop() {
+    if (!client.connected()) {
+        if (client.connect(serverIP, serverPort)) {
+            Serial.println("Đã kết nối thành công tới Server C!");
         }
         delay(1000);
     }
 
     BLEScan *pScan = BLEDevice::getScan();
-    pScan->start(0.5, false);
-    pScan->clearResults();
+    // Quét chu kỳ ngắn 0.3 giây giúp cập nhật vị trí thời gian thực cực nhạy
+    pScan->start(0.3, false); 
+    pScan->clearResults(); 
 }

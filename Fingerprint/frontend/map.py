@@ -6,11 +6,10 @@ import threading
 import ast
 
 # Cấu hình phòng
-ROOM_WIDTH, ROOM_HEIGHT, ROOM_Z = 382, 420, 300 # Giả sử trần nhà cao 300cm
+ROOM_WIDTH, ROOM_HEIGHT, ROOM_Z = 382, 420, 300 
 PYTHON_PORT = 9999
 FILE_NAME = "fingerprint_3d.txt"
 
-# Danh sách vật thể cố định: (x, y, z_start, w, h, d_height, color, label)
 OBJECTS = [
     (100, 0, 0, 148, 50, 90, 'red', 'tu1'),     
     (0, 16, 0, 64, 181, 225, 'blue', 'tu2'),
@@ -20,8 +19,16 @@ OBJECTS = [
     (312, 123, 0, 70, 120, 75, 'cyan', 'ban')      
 ]
 
-current_pos = [0, 0, 0]
-fingerprint_db = {}
+current_pos = [0.0, 0.0, 0.0]
+fingerprint_db = []
+
+def normalize_rssi(rssi_vals):
+
+    v = np.array(rssi_vals, dtype=float)
+
+    mean = np.mean(v)
+
+    return v - mean
 
 # --- ĐỌC CƠ SỞ DỮ LIỆU TỪ FILE TXT ---
 def load_database():
@@ -32,36 +39,95 @@ def load_database():
                 coord_str, rssi_str = line.split(":")
                 coord = ast.literal_eval(coord_str.strip())
                 rssi = ast.literal_eval(rssi_str.strip())
-                fingerprint_db[coord] = rssi
-        print(f"Đã nạp {len(fingerprint_db)} điểm Fingerprint vào bộ nhớ.")
+                fingerprint_db.append(
+                    (
+                        coord,
+                        np.array(rssi, dtype=float)
+                    )
+                )
+        print(f"Đã nạp {len(fingerprint_db)} điểm Fingerprint ĐÃ CHUẨN HÓA vào bộ nhớ.")
     except FileNotFoundError:
         print(f"Lỗi: Không tìm thấy file {FILE_NAME}. Hãy chạy script thu thập trước!")
     except Exception as e:
         print(f"Lỗi khi đọc file: {e}")
 
-# --- THUẬT TOÁN ĐỊNH VỊ 3D ---
-def find_position_3d(current_rssi, k=3):
-    distances = []
-    for coord, rssi_vector in fingerprint_db.items():
-        if len(rssi_vector) < 3: continue
-            
-        dist = np.sqrt(sum((current_rssi[i] - rssi_vector[i])**2 for i in range(3)))
-        distances.append((dist, coord))
-    
-    if not distances:
-        return current_pos[0], current_pos[1], current_pos[2]
-    
-    distances.sort(key=lambda x: x[0])
-    neighbors = distances[:k]
-    
-    total_w = sum(1.0 / (d[0] + 0.1) for d in neighbors)
-    
-    final_x = sum(n[1][0] * (1.0 / (n[0] + 0.1)) for n in neighbors) / total_w
-    final_y = sum(n[1][1] * (1.0 / (n[0] + 0.1)) for n in neighbors) / total_w
-    final_z = sum(n[1][2] * (1.0 / (n[0] + 0.1)) for n in neighbors) / total_w
-    
-    return final_x, final_y, final_z
+# --- THUẬT TOÁN ĐỊNH VỊ 3D CHUẨN HÓA VECTOR ---
+def find_position_3d(current_raw_rssi):
 
+    if len(fingerprint_db) == 0:
+        return current_pos[0], current_pos[1], current_pos[2]
+
+    current_vec = normalize_rssi(
+        current_raw_rssi
+    )
+
+    distances = []
+
+    for coord, db_vec in fingerprint_db:
+
+        dist = np.linalg.norm(
+            current_vec - db_vec
+        )
+
+        distances.append(
+            (
+                dist,
+                coord
+            )
+        )
+
+    distances.sort(
+        key=lambda x: x[0]
+    )
+
+    K = min(
+        10,
+        len(distances)
+    )
+
+    neighbors = distances[:K]
+
+    sigma = neighbors[-1][0]
+
+    if sigma < 0.0001:
+        sigma = 0.0001
+
+    weights = []
+
+    for dist, _ in neighbors:
+
+        w = np.exp(
+            -(dist * dist)
+            /
+            (2 * sigma * sigma)
+        )
+
+        weights.append(w)
+
+    total_w = sum(weights)
+
+    x = sum(
+        neighbors[i][1][0]
+        *
+        weights[i]
+        for i in range(K)
+    ) / total_w
+
+    y = sum(
+        neighbors[i][1][1]
+        *
+        weights[i]
+        for i in range(K)
+    ) / total_w
+
+    z = sum(
+        neighbors[i][1][2]
+        *
+        weights[i]
+        for i in range(K)
+    ) / total_w
+
+    return x, y, z
 # --- LẮNG NGHE UDP ---
 def udp_listener():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -99,19 +165,13 @@ fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
 
 def update_map():
-    # Thiết lập góc nhìn mặc định ban đầu (chỉ chạy 1 lần duy nhất trước vòng lặp)
     ax.view_init(elev=20, azim=45)
     
     while True:
-        # 1. LẤY GÓC NHÌN HIỆN TẠI (Người dùng đang xoay bằng chuột)
-        # Nếu là lần chạy đầu tiên, nó sẽ lấy góc (20, 45) ở trên
         current_elev = ax.elev
         current_azim = ax.azim
         
-        # 2. Xóa đồ thị cũ
         ax.clear()
-        
-        # Thiết lập giới hạn trục như cũ
         ax.set_xlim(0, ROOM_WIDTH)
         ax.set_ylim(0, ROOM_HEIGHT)
         ax.set_zlim(0, ROOM_Z)
@@ -119,26 +179,27 @@ def update_map():
         ax.set_ylabel('Trục Y')
         ax.set_zlabel('Trục Z (Độ cao)')
         
-        # Vẽ các vật thể 3D
         for x, y, z, w, h, d, color, label in OBJECTS:
             draw_3d_box(ax, x, y, z, w, h, d, color)
             ax.text(x + w/2, y + h/2, z + d + 10, label, color='black', ha='center')
 
-        # Vẽ dữ liệu Fingerprint
         if fingerprint_db:
-            fps_x, fps_y, fps_z = zip(*fingerprint_db.keys())
-            ax.scatter(fps_x, fps_y, fps_z, c='gray', s=10, alpha=0.3, label='Dữ liệu mẫu')
+            coords = [fp[0] for fp in fingerprint_db]
 
-        # Vẽ vị trí ngôi sao đỏ và hiển thị tọa độ
+            fps_x = [c[0] for c in coords]
+            fps_y = [c[1] for c in coords]
+            fps_z = [c[2] for c in coords]
+            ax.scatter(fps_x, fps_y, fps_z, c='gray', s=15, alpha=0.4, label='Dữ liệu mẫu')
+
+        # Vẽ vị trí đối tượng di chuyển
         ax.scatter(current_pos[0], current_pos[1], current_pos[2], c='red', s=200, marker='*', label='Tag (Thiết bị)')
         ax.text(current_pos[0], current_pos[1], current_pos[2] + 15, 
                 f"({current_pos[0]:.1f}, {current_pos[1]:.1f}, {current_pos[2]:.1f})", 
                 color='red', fontweight='bold', ha='center', fontsize=10)
         
-        ax.set_title(f"HỆ THỐNG ĐỊNH VỊ FINGERPRINT 3D\nTọa độ Tag: X = {current_pos[0]:.1f} | Y = {current_pos[1]:.1f} | Z = {current_pos[2]:.1f}", 
+        ax.set_title(f"HỆ THỐNG ĐỊNH VỊ FINGERPRINT VỚI VECTOR CHUẨN HÓA\nTọa độ Tag: X = {current_pos[0]:.1f} | Y = {current_pos[1]:.1f} | Z = {current_pos[2]:.1f}", 
                      fontsize=12, fontweight='bold', color='darkblue', pad=20)
         
-        # 3. KHÔI PHỤC LẠI GÓC NHÌN MÀ NGƯỜI DÙNG VỪA XOAY
         ax.view_init(elev=current_elev, azim=current_azim)
         
         plt.draw()

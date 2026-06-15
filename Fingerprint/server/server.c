@@ -17,10 +17,9 @@ typedef struct
     int updated;
 } Scanner;
 
-// Giữ nguyên danh sách MAC của bạn
 Scanner scanners[3] = {
     {"c8:f0:9e:26:48:80", -100.0f, 0}, // S1
-    {"1c:c3:ab:c3:f7:78", -100.0f, 0}, // S2
+    {"78:1c:3c:b7:af:7c", -100.0f, 0}, // S2
     {"b0:cb:d8:9a:64:40", -100.0f, 0}  // S3
 };
 
@@ -88,11 +87,10 @@ int main()
                     line = strtok(NULL, "\n");
                 }
 
-                // Gửi sang Python khi nhận đủ dữ liệu từ 3 trạm (hoặc có cập nhật mới)
+                // --- SỬA LỖI LOGIC: Chỉ gửi khi cả 3 Scanner đều có dữ liệu mới phối hợp ---
                 if (scanners[0].updated && scanners[1].updated && scanners[2].updated)
                 {
                     char payload[128];
-                    // Gửi RSSI trực tiếp, không tính khoảng cách ở đây
                     sprintf(payload, "%.2f,%.2f,%.2f",
                             scanners[0].last_filtered_rssi,
                             scanners[1].last_filtered_rssi,

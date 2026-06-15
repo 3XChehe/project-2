@@ -6,13 +6,21 @@ UDP_IP = "127.0.0.1"
 UDP_PORT = 9999
 FILE_NAME = "fingerprint_3d.txt"
 
+def normalize_rssi(rssi_vals):
+
+    v = np.array(rssi_vals, dtype=float)
+
+    mean = np.mean(v)
+
+    return (v - mean).tolist()
+
 def start_collector():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
     sock.settimeout(0.1)
     
     print(f"--- Đang lắng nghe Server C trên cổng {UDP_PORT} ---")
-    print(f"Dữ liệu sẽ được lưu vào file: {FILE_NAME}")
+    print(f"Dữ liệu CHUẨN HÓA sẽ được lưu vào file: {FILE_NAME}")
     
     with open(FILE_NAME, mode='a', encoding='utf-8') as file:
         while True:
@@ -27,6 +35,7 @@ def start_collector():
                 
                 target_x, target_y, target_z = map(float, parts)
                 sock.settimeout(0.1)
+                
                 # Xả bộ đệm (xóa dữ liệu cũ)
                 print("Đang xả bộ đệm...")
                 while True:
@@ -35,12 +44,12 @@ def start_collector():
                     except socket.timeout:
                         break
                 
-                # Lấy 10 mẫu mới
-                print(f"Đang thu thập 10 mẫu tại ({target_x}, {target_y}, {target_z})...")
+                # Lấy 20 mẫu mới
+                print(f"Đang thu thập 20 mẫu RSSI tại ({target_x}, {target_y}, {target_z})...")
                 samples = []
-                sock.settimeout(10.0) # Tăng timeout khi đang lấy mẫu
+                sock.settimeout(10.0) 
                 
-                while len(samples) < 10:
+                while len(samples) < 50:
                     try:
                         data, addr = sock.recvfrom(1024)
                         rssi_str = data.decode('utf-8')
@@ -49,22 +58,31 @@ def start_collector():
                         if len(rssi_vals) >= 3:
                             samples.append(rssi_vals[:3])
                             if len(samples) % 10 == 0:
-                                print(f"Đã lấy {len(samples)}/50 mẫu...")
+                                print(f"Đã lấy {len(samples)}/20 mẫu...")
                     except socket.timeout:
                         print("Cảnh báo: Mất kết nối với Server C!")
                         break
                 
-                if len(samples) == 10:
-                    # Tính trung bình
-                    avg_rssi = np.round(np.mean(samples, axis=0), 2).tolist()
-                    
-                    # Tạo chuỗi theo định dạng yêu cầu
-                    # VD: (382.0, 90.0, 150.0) : [-72.37, -64.25, -74.87]
-                    line = f"({target_x}, {target_y}, {target_z}) : {avg_rssi}\n"
+                if len(samples) == 50:
+                    # 1. Tính trung bình RSSI thô từ 20 mẫu
+                    avg_raw_rssi = np.mean(samples, axis=0)
+
+                    normalized_rssi = normalize_rssi(avg_raw_rssi)
+
+                    normalized_rssi = [
+                        round(x, 4)
+                        for x in normalized_rssi
+                    ]
+
+                    line = (
+                        f"({target_x}, {target_y}, {target_z}) : "
+                        f"{[round(x,2) for x in avg_raw_rssi]} : "
+                        f"{normalized_rssi}\n"
+                    )
                     
                     file.write(line)
                     file.flush()
-                    print(f"==> Đã lưu: {line.strip()}")
+                    print(f"==> Đã lưu (Đã chuẩn hóa): {line.strip()}")
                 
             except ValueError:
                 print("Lỗi định dạng số!")

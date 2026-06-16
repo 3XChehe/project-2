@@ -4,6 +4,7 @@ import numpy as np
 import socket
 import threading
 import ast
+from collections import defaultdict
 
 # Cấu hình phòng
 ROOM_WIDTH, ROOM_HEIGHT, ROOM_Z = 382, 420, 300 
@@ -22,56 +23,113 @@ OBJECTS = [
 current_pos = [0.0, 0.0, 0.0]
 fingerprint_db = []
 
-def normalize_rssi(rssi_vals):
+def extract_feature(rssi_vals):
 
-    v = np.array(rssi_vals, dtype=float)
+    r = np.array(rssi_vals, dtype=float)
 
-    mean = np.mean(v)
+    return np.array([
+        r[0],
+        r[1],
+        r[2],
+        r[0] - r[1],
+        r[0] - r[2],
+        r[1] - r[2]
+    ])
 
-    return v - mean
 
-# --- ĐỌC CƠ SỞ DỮ LIỆU TỪ FILE TXT ---
 def load_database():
-    try:
-        with open(FILE_NAME, "r", encoding='utf-8') as f:
-            for line in f:
-                if not line.strip(): continue
-                coord_str, rssi_str = line.split(":")
-                coord = ast.literal_eval(coord_str.strip())
-                rssi = ast.literal_eval(rssi_str.strip())
-                fingerprint_db.append(
-                    (
-                        coord,
-                        np.array(rssi, dtype=float)
-                    )
-                )
-        print(f"Đã nạp {len(fingerprint_db)} điểm Fingerprint ĐÃ CHUẨN HÓA vào bộ nhớ.")
-    except FileNotFoundError:
-        print(f"Lỗi: Không tìm thấy file {FILE_NAME}. Hãy chạy script thu thập trước!")
-    except Exception as e:
-        print(f"Lỗi khi đọc file: {e}")
 
-# --- THUẬT TOÁN ĐỊNH VỊ 3D CHUẨN HÓA VECTOR ---
+    fingerprint_db.clear()
+
+    grouped = defaultdict(list)
+
+    try:
+
+        with open(FILE_NAME, "r", encoding="utf-8") as f:
+
+            for line in f:
+
+                line = line.strip()
+
+                if not line:
+                    continue
+
+                parts = line.split(" : ")
+
+                if len(parts) < 2:
+                    continue
+
+                coord = ast.literal_eval(parts[0])
+
+                raw_str = parts[1]
+
+                raw_str = raw_str.replace(
+                    "np.float64(",
+                    ""
+                ).replace(
+                    ")",
+                    ""
+                )
+
+                raw_rssi = ast.literal_eval(raw_str)
+
+                feature = extract_feature(
+                    raw_rssi
+                )
+
+                grouped[coord].append(
+                    feature
+                )
+
+        for coord, feature_list in grouped.items():
+
+            fingerprint_db.append(
+                (
+                    coord,
+                    feature_list
+                )
+            )
+
+        print(
+            f"Đã nạp {len(fingerprint_db)} tọa độ."
+        )
+
+    except Exception as e:
+        print(
+            "Lỗi đọc DB:",
+            e
+        )
 def find_position_3d(current_raw_rssi):
 
     if len(fingerprint_db) == 0:
-        return current_pos[0], current_pos[1], current_pos[2]
+        return (
+            current_pos[0],
+            current_pos[1],
+            current_pos[2]
+        )
 
-    current_vec = normalize_rssi(
+    current_feature = extract_feature(
         current_raw_rssi
     )
 
     distances = []
 
-    for coord, db_vec in fingerprint_db:
+    for coord, feature_list in fingerprint_db:
 
-        dist = np.linalg.norm(
-            current_vec - db_vec
-        )
+        best_dist = float("inf")
+
+        for db_feature in feature_list:
+
+            dist = np.linalg.norm(
+                current_feature - db_feature
+            )
+
+            if dist < best_dist:
+                best_dist = dist
 
         distances.append(
             (
-                dist,
+                best_dist,
                 coord
             )
         )
@@ -80,54 +138,54 @@ def find_position_3d(current_raw_rssi):
         key=lambda x: x[0]
     )
 
+    print("\nTOP 10")
+
+    for d, c in distances[:10]:
+        print(
+            round(d, 3),
+            c
+        )
+
     K = min(
-        10,
+        3,
         len(distances)
     )
 
     neighbors = distances[:K]
 
-    sigma = neighbors[-1][0]
-
-    if sigma < 0.0001:
-        sigma = 0.0001
-
     weights = []
 
     for dist, _ in neighbors:
 
-        w = np.exp(
-            -(dist * dist)
-            /
-            (2 * sigma * sigma)
-        )
+        w = 1.0 / (dist + 0.001)
 
         weights.append(w)
 
     total_w = sum(weights)
 
     x = sum(
-        neighbors[i][1][0]
-        *
+        neighbors[i][1][0] *
         weights[i]
         for i in range(K)
     ) / total_w
 
     y = sum(
-        neighbors[i][1][1]
-        *
+        neighbors[i][1][1] *
         weights[i]
         for i in range(K)
     ) / total_w
 
     z = sum(
-        neighbors[i][1][2]
-        *
+        neighbors[i][1][2] *
         weights[i]
         for i in range(K)
     ) / total_w
 
-    return x, y, z
+    return (
+        x,
+        y,
+        z
+    )
 # --- LẮNG NGHE UDP ---
 def udp_listener():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

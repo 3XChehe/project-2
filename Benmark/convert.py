@@ -33,7 +33,7 @@ def load_sensor_file(path):
 
 
 sensor_files = sorted(
-    glob("fingerprints/*.txt")
+    glob("fingerprints_grid_0.5/*.txt")
 )
 all_sensors = {}
 common_positions = None
@@ -74,7 +74,7 @@ df = pd.DataFrame(
 )
 
 df.to_csv(
-    "knn_dataset_12.csv",
+    "knn_dataset_12_grid_0.5.csv",
     index=False
 )
 

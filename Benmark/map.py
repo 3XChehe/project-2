@@ -1,368 +1,168 @@
 import pandas as pd
 import numpy as np
+from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
-import threading
-import time
+from matplotlib.animation import FuncAnimation
 
-TRAIN_FILE = "knn_dataset_12.csv"
-TEST_FILE = "test_knn_12.csv"
+# --- CONFIGURATION ---
+TRAIN_FILE = "knn_dataset_12_grid_0.5.csv"
+TEST_FILE = "test_knn_12_rectangular_with_rotation.csv"
 
-current_pos = [0.0, 0.0]
-ground_truth = [0.0, 0.0]
+SENSOR_COLUMNS = [
+    "sensor10_0", "sensor11_0", "sensor12_0",
+    "sensor20_0", "sensor21_0", "sensor22_0",
+    "sensor30_0", "sensor31_0", "sensor32_0",
+    "sensor40_0", "sensor41_0", "sensor42_0"
+]
 
-trajectory_pred = []
-trajectory_gt = []
-current_error = 0
-# =========================
-# TRAIN KNN
-# =========================
-fingerprint_db = []
-feature_columns = []
-
-def load_database():
-
-    global fingerprint_db
-    global feature_columns
-
-    df = pd.read_csv(TRAIN_FILE)
-
-    feature_columns = [
-        c for c in df.columns
-        if c not in ["x","y"]
-    ]
-
-    print(
-        "Using",
-        len(feature_columns),
-        "sensors"
-    )
-
-    grouped = {}
-    for _, row in df.iterrows():
-
-        coord = (
-            float(row["x"]),
-            float(row["y"])
-        )
-
-        feature = row[
-            feature_columns
-        ].values.astype(float)
-
-        if coord not in grouped:
-            grouped[coord] = []
-
-        grouped[coord].append(feature)
-
-    fingerprint_db = list(
-        grouped.items()
-    )
-
-    print(
-        f"Loaded {len(fingerprint_db)} coordinates"
-    )
-
-sensor_pos = {
-
-    "sensor10": (7.00, 7.09),
-    "sensor11": (7.18, 0.68),
-    "sensor12": (0.71, 6.16),
-
-    "sensor20": (7.25, 11.36),
-    "sensor21": (0.76, 12.13),
-    "sensor22": (7.18, 17.64),
-
-    "sensor30": (13.14, 12.33),
-    "sensor31": (12.82, 16.83),
-    "sensor32": (18.12, 11.93),
-
-    "sensor40": (13.01, 5.51),
-    "sensor41": (17.77, 6.33),
-    "sensor42": (12.76, 0.27)
-}
-
-def predict_position(rssi_vector):
-
-    # ==========================
-    # Chọn 3 sensor RSSI mạnh nhất
-    # ==========================
-
-    strongest_idx = np.argsort(
-        rssi_vector
-    )[-3:]
+def run_simulation():
+    print("="*60)
+    print("  ĐANG HUẤN LUYỆN AI VÀ CHUẨN BỊ MÔ PHỎNG STEP-BY-STEP  ")
+    print("="*60)
     
-    selected = [
-        feature_columns[i]
-        for i in strongest_idx
-    ]
+    # 1. Đọc dữ liệu
+    df_train = pd.read_csv(TRAIN_FILE)
+    df_test = pd.read_csv(TEST_FILE)
 
-    print(
-        "Using:",
-        selected
+    # 2. Làm mịn dữ liệu TestCase bằng bộ lọc tâm Window = 5
+    df_test_smoothed = df_test.copy()
+    for col in SENSOR_COLUMNS:
+        df_test_smoothed[col] = df_test_smoothed[col].rolling(window=5, min_periods=1, center=True).mean()
+    
+    # 3. Tách tập dữ liệu
+    X_train = df_train[SENSOR_COLUMNS].values
+    y_train = df_train[['x', 'y']].values
+    X_test = df_test_smoothed[SENSOR_COLUMNS].values
+    y_test = df_test[['x', 'y']].values 
+
+    # 4. Chuẩn hóa dữ liệu sóng
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+
+    # 5. Huấn luyện mạng Nơ-ron MLP
+    mlp = MLPRegressor(
+        hidden_layer_sizes=(128, 64, 32), 
+        activation='relu', solver='adam', max_iter=1500, random_state=42,
+        early_stopping=True, validation_fraction=0.1
     )
-
-    feature = np.array(
-        rssi_vector
-    )[strongest_idx]
-
-    distances = []
-
-    for coord, feature_list in fingerprint_db:
-
-        best_dist = float("inf")
-
-        for db_feature in feature_list:
-
-            db_sub = db_feature[
-                strongest_idx
-            ]
-
-            dist = np.linalg.norm(
-                feature - db_sub
-            )
-
-            if dist < best_dist:
-                best_dist = dist
-
-        distances.append(
-            (
-                best_dist,
-                coord
-            )
-        )
-
-    distances.sort(
-        key=lambda x: x[0]
-    )
-
-    K = 5
-
-    neighbors = distances[:K]
-
-    weights = [
-        1/(d+0.001)
-        for d,_ in neighbors
-    ]
-
-    total_w = sum(weights)
-
-    px = sum(
-        neighbors[i][1][0] *
-        weights[i]
-        for i in range(K)
-    ) / total_w
-
-    py = sum(
-        neighbors[i][1][1] *
-        weights[i]
-        for i in range(K)
-    ) / total_w
-
-    return px, py
-# =========================
-# REALTIME REPLAY
-# =========================
-
-def replay_test():
-
-    global current_pos
-    global ground_truth
-
-    df = pd.read_csv(TEST_FILE)
-
-    prev_time = None
-
-    SPEEDUP = 2
-
-    errors = []
-
-    for _, row in df.iterrows():
-
-        ts = row["timestamp"]
-
-        if prev_time is not None:
-
-            dt = ts - prev_time
-
-            time.sleep(
-                max(
-                    dt / SPEEDUP,
-                    0.01
-                )
-            )
-
-        prev_time = ts
-
-        rssi = row[
-            feature_columns
-        ].values.astype(float)
-
-        px, py = predict_position(
-            rssi
-        )
-
-        current_pos[0] = px
-        current_pos[1] = py
-
-        trajectory_pred.append(
-            (px, py)
-        )
-
-        trajectory_gt.append(
-            (
-                row["x"],
-                row["y"]
-            )
-        )
-
-        ground_truth[0] = row["x"]
-        ground_truth[1] = row["y"]
-
-        err = np.sqrt(
-            (px-row["x"])**2 +
-            (py-row["y"])**2
-        )
-        global current_error
-        current_error = err
-
-        errors.append(err)
-
-        print(
-            f"GT=({row['x']:.2f},{row['y']:.2f}) "
-            f"PRED=({px:.2f},{py:.2f}) "
-            f"ERR={err:.2f}m"
-        )
-
-    print("\n===== RESULT =====")
-
-    print(
-        "Mean Error:",
-        np.mean(errors)
-    )
-
-    print(
-        "RMSE:",
-        np.sqrt(
-            np.mean(
-                np.square(errors)
-            )
-        )
-    )
-
-# =========================
-# MAP
-# =========================
-
-dongles = {
-
-    "sensor10": (7.00, 7.09),
-    "sensor11": (7.18, 0.68),
-    "sensor12": (0.71, 6.16),
-
-    "sensor20": (7.25, 11.36),
-    "sensor21": (0.76, 12.13),
-    "sensor22": (7.18, 17.64),
-
-    "sensor30": (13.14, 12.33),
-    "sensor31": (12.82, 16.83),
-    "sensor32": (18.12, 11.93),
-
-    "sensor40": (13.01, 5.51),
-    "sensor41": (17.77, 6.33),
-    "sensor42": (12.76, 0.27)
-}
-
-plt.ion()
-
-fig, ax = plt.subplots(
-    figsize=(9,9)
-)
-
-def update_map():
-
-    while True:
-
-        ax.clear()
-
-        ax.set_xlim(0,20)
-        ax.set_ylim(0,20)
-
-        ax.grid(True)
-
-        ax.set_title(
-            f"Realtime Fingerprinting\n"
-            f"Error = {current_error:.2f} m"
-        )
-
-        for name,(x,y) in dongles.items():
-
-            ax.scatter(
-                x,
-                y,
-                c='blue',
-                s=200,
-                marker='^'
-            )
-
-            ax.text(
-                x+0.2,
-                y+0.2,
-                name
-            )
-
-        if len(trajectory_gt) > 1:
-
-            ax.plot(
-                [p[0] for p in trajectory_gt],
-                [p[1] for p in trajectory_gt],
-                'g--',
-                linewidth=2
-            )
-
-        if len(trajectory_pred) > 1:
-
-            ax.plot(
-                [p[0] for p in trajectory_pred],
-                [p[1] for p in trajectory_pred],
-                'r-',
-                linewidth=2
-            )
-
-        # Ground Truth
-
-        ax.scatter(
-            ground_truth[0],
-            ground_truth[1],
-            c='green',
-            s=120,
-            label='Ground Truth'
-        )
-
-        # Prediction
-
-        ax.scatter(
-            current_pos[0],
-            current_pos[1],
-            c='red',
-            s=200,
-            marker='*',
-            label='Prediction'
-        )
-
-        ax.legend()
-
-        plt.draw()
-        plt.pause(0.05)
-
-# =========================
-# MAIN
-# =========================
-
-load_database()
-
-threading.Thread(
-    target=replay_test,
-    daemon=True
-).start()
-
-update_map()
+    mlp.fit(X_train_scaled, y_train)
+
+    # 6. Dự đoán vị trí từ AI (Tọa độ thô trước khi qua Kalman)
+    y_pred_raw = mlp.predict(X_test_scaled)
+
+    # 7. Áp dụng Kalman Filter ĐỘNG LỰC HỌC 4D (Tọa độ + Vận tốc)
+    print("Đang chạy Kalman Động lực học 4D: Tự tính toán vận tốc để đuổi kịp Tag...")
+    y_pred = np.zeros_like(y_pred_raw)
+    
+    # Trạng thái hiện tại gồm 4 biến: [x, y, vx, vy]. Ban đầu vận tốc bằng 0.
+    X_state = np.array([[y_pred_raw[0, 0]], [y_pred_raw[0, 1]], [0.0], [0.0]]) 
+    
+    dt = 1.0 # Khoảng thời gian giữa 2 timestamp (giả định 1 giây)
+    
+    # Ma trận chuyển trạng thái vật lý: X = X + vx*dt
+    F = np.array([
+        [1.0, 0.0,  dt, 0.0],
+        [0.0, 1.0, 0.0,  dt],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+    
+    # Ma trận quan sát: AI chỉ trả về Tọa độ (x,y), không trả về vận tốc
+    H = np.array([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0]
+    ])
+    
+    P = np.eye(4) * 1.0  # Hiệp phương sai lỗi ban đầu
+    Q = np.eye(4) * 2.0  # Nhiễu hệ thống (bảo Kalman người có thể đổi vận tốc linh hoạt)
+    R = np.eye(2) * 0.5  # Nhiễu phép đo của mạng MLP (~1.5m đến 2m)
+
+    for t in range(len(y_pred_raw)):
+        # Bước 1: Dự báo vị trí dựa trên vận tốc hiện tại
+        X_state = np.dot(F, X_state)
+        P = np.dot(F, np.dot(P, F.T)) + Q
+        
+        # Bước 2: Cập nhật dữ liệu từ AI
+        Z = np.array([[y_pred_raw[t, 0]], [y_pred_raw[t, 1]]]) # Tọa độ AI đoán
+        Y_residual = Z - np.dot(H, X_state)
+        S = np.dot(H, np.dot(P, H.T)) + R
+        K = np.dot(P, np.dot(H.T, np.linalg.inv(S))) 
+        
+        X_state = X_state + np.dot(K, Y_residual)
+        P = P - np.dot(K, np.dot(H, P))
+        
+        # Lưu lại tọa độ sau lọc
+        y_pred[t, 0] = X_state[0, 0]
+        y_pred[t, 1] = X_state[1, 0]
+
+    # Tính toán sai số cuối cùng
+    errors = np.sqrt(np.sum((y_pred - y_test) ** 2, axis=1))
+    mean_error = np.mean(errors)
+
+    # --- 8. THIẾT LẬP ĐỒ THỊ MÔ PHỎNG ĐỘNG (ANIMATION) ---
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.set_xlim(-1, 22)
+    ax.set_ylim(-1, 19)
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_xlabel("Tọa độ X (Mét)", fontsize=11)
+    ax.set_ylabel("Tọa độ Y (Mét)", fontsize=11)
+    
+    title = ax.set_title("Mô phỏng hành trình định vị Step-by-Step (Bắt đầu...)", fontsize=12, fontweight='bold')
+
+    # Khởi tạo các cấu trúc hình học trống để cập nhật từng khung hình
+    line_gt, = ax.plot([], [], 'o-', color='blue', alpha=0.3, label='Đường đi thực tế (Ground Truth)')
+    line_pred, = ax.plot([], [], 's--', color='red', alpha=0.3, label='Đường đi Kalman Filter')
+    
+    point_gt, = ax.plot([], [], 'o', color='blue', markersize=10, label='Tag Thật hiện tại')
+    point_pred, = ax.plot([], [], 's', color='red', markersize=10, label='AI đoán hiện tại')
+    
+    # Danh sách lưu các đường nối sai số nối giữa các bước
+    error_lines = []
+
+    # Đánh dấu cố định điểm Xuất phát và Kết thúc
+    ax.scatter(y_test[0, 0], y_test[0, 1], color='green', marker='^', s=120, label='XUẤT PHÁT', zorder=5)
+    ax.scatter(y_test[-1, 0], y_test[-1, 1], color='black', marker='X', s=120, label='KẾT THÚC', zorder=5)
+    ax.legend(loc='upper right')
+
+    total_frames = len(y_test)
+
+    # Hàm vẽ từng bước (Khung hình thứ `frame`)
+    def update(frame):
+        # Vẽ các đoạn đường đã đi qua tính đến thời điểm hiện tại
+        line_gt.set_data(y_test[:frame+1, 0], y_test[:frame+1, 1])
+        line_pred.set_data(y_pred[:frame+1, 0], y_pred[:frame+1, 1])
+        
+        # Cập nhật vị trí nhấp nháy của con Tag ở giây hiện tại
+        point_gt.set_data([y_test[frame, 0]], [y_test[frame, 1]])
+        point_pred.set_data([y_pred[frame, 0]], [y_pred[frame, 1]])
+        
+        # Vẽ đường kết nối sai số cho bước hiện tại
+        el, = ax.plot([y_test[frame, 0], y_pred[frame, 0]], 
+                      [y_test[frame, 1], y_pred[frame, 1]], 
+                      color='gray', linestyle=':', alpha=0.6)
+        error_lines.append(el)
+        
+        # Cập nhật tiêu đề động hiển thị sai số tức thời của bước đó
+        current_err = errors[frame]
+        title.set_text(f"Mô phỏng Định vị BLE Step-by-Step\nBước: {frame+1}/{total_frames} | Sai số gói hiện tại: {current_err:.2f}m | ME Tổng: {mean_error:.2f}m")
+        
+        return [line_gt, line_pred, point_gt, point_pred] + error_lines
+
+    # Khởi chạy Animation: cứ 200 mili-giây (interval=200) di chuyển 1 bước
+    ani = FuncAnimation(fig, update, frames=total_frames, interval=300, blit=True, repeat=False)
+    
+    print("🔮 Cửa sổ mô phỏng đang hiển thị. Hãy xem con Tag di chuyển...")
+    plt.show()
+
+    # Tùy chọn: Lưu lại thành file GIF để bạn chèn vào Slide thuyết trình PowerPoint cho sinh động
+    try:
+        print("💾 Đang xuất video mô phỏng hành trình dạng file ảnh động GIF...")
+        ani.save("positioning_simulation.gif", writer='pillow', fps=3)
+        print("✨ Xuất file 'positioning_simulation.gif' thành công!")
+    except Exception as e:
+        print(f"Không thể lưu file GIF (Thiếu thư viện pillow): {e}")
+
+if __name__ == "__main__":
+    run_simulation()
